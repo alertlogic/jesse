@@ -88,7 +88,7 @@ triple_error_test() ->
 
 custom_accumulator_test() ->
     SingleError = to_json(single_error()),
-    MyFun = fun (Error, my) -> [{my_data, Error}] end,
+    MyFun = fun (_Path, Error, my) -> [{my_data, Error}] end,
     ?assertMatch({error, [ {my_data, _} ]},
         jesse:validate_with_accumulator(schema(), SingleError, MyFun, my)).
 

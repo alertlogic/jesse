@@ -45,11 +45,13 @@
 -export_type([ json_term/0
              ]).
 
--type accumulator() :: fun((error(), term()) -> term()).
+-type accumulator() :: fun(( jesse_json_path:path()
+                           , jesse_schema_validator:error()
+                           , term() ) -> term()).
 -type parser()      :: fun((binary()) -> json_term()).
 
 -type json_term()   :: term().
--type error()       :: {error, term()}.
+-type error()       :: {error, jesse_schema_validator:error()}.
 
 %%% API
 %% @doc Adds a schema definition `Schema' to in-memory storage associated with
@@ -131,7 +133,7 @@ validate(Schema, Data) ->
   try
     JsonSchema = jesse_database:read(Schema),
     jesse_schema_validator:validate(JsonSchema, Data,
-                                    {fun throw_on_error/2, undefined})
+                                    {fun throw_on_error/3, undefined})
   catch
     throw:Error ->
       {error, Error}
@@ -161,7 +163,7 @@ validate(Schema, Data, ParseFun) ->
 validate_with_schema(Schema, Data) ->
   try
     jesse_schema_validator:validate(Schema, Data,
-                                    {fun throw_on_error/2, undefined})
+                                    {fun throw_on_error/3, undefined})
   catch
     throw:Error ->
       {error, Error}
@@ -196,7 +198,7 @@ validate_with_schema(Schema, Data, ParseFun) ->
                                ) ->
     {ok, json_term()} | {error, [error()]}.
 validate_with_accumulator(Schema, Data) ->
-    validate_with_accumulator(Schema, Data, fun collect_errors/2, []).
+    validate_with_accumulator(Schema, Data, fun collect_errors/3, []).
 
 
 %% @doc Equivalent to {@link validate_with_schema/3} but with the additional
@@ -271,13 +273,13 @@ validate_with_accumulator(Schema, Data, ParseFun, Accumulator, Initial) ->
 %% @doc Utility function to be used as a dummy accumulator callback which fails
 %%      on the first error.
 %% @private
-throw_on_error(Error, _) ->
+throw_on_error(_Path, Error, _) ->
     throw(Error).
 
 
 %% @doc Utility function to accumulate errors found during validation.
 %% @private
-collect_errors(Error, List) ->
+collect_errors(_StringPath, Error, List) ->
     [Error | List].
 
 %% @doc Wraps up calls to a third party json parser.

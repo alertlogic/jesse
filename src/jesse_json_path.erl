@@ -6,6 +6,9 @@
 -module(jesse_json_path).
 -export([path/2, value/3, to_proplist/1, unwrap_value/1]).
 
+%% API for path management
+-export([new/0, new/1, push/2, pop/1, to_string/1]).
+
 -type elem_key_type() :: atom | binary | string | undefined.
 -type elem_type() :: list | elem_key_type().
 -type kvc_obj() :: kvc_obj_node() | [kvc_obj_node()] | list().
@@ -15,7 +18,9 @@
                       | dict() | gb_tree() | term().
 -type typed_proplist() :: {proplist() | {gb_tree, gb_tree()}, elem_type()}.
 
--export_type([proplist/0, kvc_key/0, kvc_obj/0]).
+-type path() :: list().
+
+-export_type([proplist/0, kvc_key/0, kvc_obj/0, path/0]).
 
 %% @doc Return the result of the query Path on P.
 -spec path(kvc_key() | [kvc_key()], kvc_obj()) -> term() | [].
@@ -230,3 +235,69 @@ normalize(K, string) when is_atom(K) ->
     atom_to_list(K);
 normalize(K, undefined) ->
     K.
+
+%%%-----------------------------------------------------------------------------
+%% Path manipulation API
+%%%-----------------------------------------------------------------------------
+
+%%% ---------------------------------------------------------------------------
+-spec new/0 :: () -> path().
+%%% ---------------------------------------------------------------------------
+%% @doc Create empty JSON path object.
+%%
+%% Internally a path is represented with a list of elements in reverse order.
+%% So pushing new elements to the path is an insertion to the head of this list,
+%% while popping is simply removing list's head.
+%% @end
+%%% ---------------------------------------------------------------------------
+new()                                  -> [].
+
+-spec new/1 :: (Root :: term()) -> path().
+new(Root)                              -> [Root].
+
+%%% ---------------------------------------------------------------------------
+-spec push/2 :: (Element :: term() | list(), Path :: path()) -> path().
+%%% ---------------------------------------------------------------------------
+%% @doc Push new element <code>Element</code> to the tail of the
+%%      <code>Path</code> object
+%% @end
+%%% ---------------------------------------------------------------------------
+push(Elements, Path) when is_list(Elements) andalso is_list(Path) ->
+    lists:append(lists:reverse(Elements), Path);
+push(Element, Path) when is_list(Path) ->
+    [Element | Path].
+
+%%% ---------------------------------------------------------------------------
+-spec pop/1 :: (Path0 :: path()) -> Path1 :: path().
+%%% ---------------------------------------------------------------------------
+%% @doc Pop element from the tail of the <code>Path0</code> object and return
+%%      the new path.
+%% @end
+%%% ---------------------------------------------------------------------------
+pop([_ | Path])                        -> Path;
+pop([])                                -> [].
+
+to_path_item(Int) when is_integer(Int) -> integer_to_list(Int);
+to_path_item(Bin) when is_binary(Bin)  -> binary_to_list(Bin);
+to_path_item(Atom) when is_atom(Atom)  -> atom_to_list(Atom);
+to_path_item(List) when is_list(List)  -> List.
+
+to_path(Value) when is_integer(Value)  -> "[" ++ to_path_item(Value) ++ "]";
+to_path(Value)                         -> "." ++ to_path_item(Value).
+
+%%% ---------------------------------------------------------------------------
+-spec to_string/1 :: (Path :: path()) -> string().
+%%% ---------------------------------------------------------------------------
+%% @doc Return string representation of the given <code>Path</code> object.
+%%
+%% For example, if the path is constructed by pushing the following elements
+%%  <code><<"root">>, "object", <<"array">>, 12, item, <<"field">></code>
+%% the resulting path will be the following string:
+%%  <code>"root.object.array[12].item.field"</code>
+%% @end
+%%% ---------------------------------------------------------------------------
+to_string([])                          -> [];
+to_string([Root])                      -> to_path_item(Root);
+to_string([H | T]) when is_list(T)     -> to_string(T) ++ to_path(H).
+
+

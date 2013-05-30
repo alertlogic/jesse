@@ -148,3 +148,24 @@ to_proplist_readme_test() ->
                                     [{<<"foo">>,
                                       {struct,
                                        [{<<"bar">>, <<"baz">>}]}}]})).
+
+to_string_test() ->
+    Root = jesse_json_path:new(<<"root">>),
+    ?assertEqual("root", jesse_json_path:to_string(Root)),
+
+    Path0 = jesse_json_path:new(),
+    ?assertEqual("", jesse_json_path:to_string(Path0)),
+
+    MyPath = [<<"items">>, 0, <<"object">>, "property", array, 12],
+    Path1 = jesse_json_path:push(MyPath, Path0),
+    ?assertEqual("items[0].object.property.array[12]",
+                 jesse_json_path:to_string(Path1)),
+
+    Path2 = jesse_json_path:pop(Path1),
+    ?assertEqual("items[0].object.property.array",
+                 jesse_json_path:to_string(Path2)),
+
+    Path3 = jesse_json_path:push(<<"array">>, Path2),
+    ?assertEqual("items[0].object.property.array.array",
+                 jesse_json_path:to_string(Path3)).
+

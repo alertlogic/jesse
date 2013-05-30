@@ -29,29 +29,6 @@
 %% fast-fail callback throwing an exception on the first error to stop
 %% validation algorithm, otherwise it will continue up to the end.
 %%
-%% An error record is a tuple of the following format
-%% <code>
-%%    { 'schema_invalid', Schema :: json_term(), Error } |
-%%    { 'data_invalid',   Schema :: json_term(), Error, Data :: json_term() }
-%%
-%%    Error = { 'missing_id_field', Field :: binary() }
-%%          | { 'missing_required_property', Name :: binary() }
-%%          | { 'missing_dependency', Name :: binary() }
-%%          | { 'no_match', Pattern :: binary() }
-%%          |   'no_extra_properties_allowed'
-%%          |   'no_extra_items_allowed'
-%%          |   'not_allowed'
-%%          | { 'not_unique', Value :: json_term() }
-%%          |   'not_in_range'
-%%          |   'not_divisible'
-%%          |   'wrong_type'
-%%          | { 'wrong_type_items', Items :: json_term() }
-%%          | { 'wrong_type_dependency', Dependency :: json_term() }
-%%          |   'wrong_size'
-%%          |   'wrong_length'
-%%          |   'wrong_format'
-%% </code>
-%%
 %% @end
 %%%=============================================================================
 
@@ -100,6 +77,33 @@
 -define(OBJECT,               <<"object">>).
 -define(STRING,               <<"string">>).
 
+%% @doc General error definition tuple
+-type error() ::
+    { 'schema_invalid', Schema :: jesse:json_term(), reason() } |
+    { 'data_invalid',   Schema :: jesse:json_term(), reason(),
+                        Data   :: jesse:json_term() }.
+
+%% @doc Uniform type of the error reasons
+-type reason()  :: { 'missing_id_field', Field :: binary() }
+                 | { 'missing_required_property', Name :: binary() }
+                 | { 'missing_dependency', Name :: binary() }
+                 | { 'no_match', Pattern :: binary() }
+                 |   'no_extra_properties_allowed'
+                 |   'no_extra_items_allowed'
+                 |   'not_allowed'
+                 | { 'not_unique', Value :: jesse:json_term() }
+                 |   'not_in_range'
+                 |   'not_divisible'
+                 |   'wrong_type'
+                 | { 'wrong_type_items', Items :: jesse:json_term() }
+                 | { 'wrong_type_dependency', Dependency :: jesse:json_term() }
+                 |   'wrong_size'
+                 |   'wrong_length'
+                 |   'wrong_format'.
+
+-export_type([error/0, reason/0]).
+
+
 %%% API
 %% @doc Validates json `Data' against `Schema'. If the given json is valid,
 %% then it is returned to the caller as is, otherwise an exception
@@ -110,7 +114,8 @@
               ) -> {ok, jesse:json_term()}
                  | {error, Arg1 :: term()}.
 validate(JsonSchema, Value, AccTuple) ->
-    case check_value(Value, unwrap(JsonSchema), JsonSchema, {ok, AccTuple}) of
+    case check_value(Value, unwrap(JsonSchema), JsonSchema,
+                     jesse_json_path:new(), {ok, AccTuple}) of
         {ok, _}                 -> {ok, Value};
         {error, {_Fun, Errors}} -> {error, Errors}
     end.
@@ -149,139 +154,176 @@ is_null(_) -> false.
 %% @doc Goes through attributes of the given schema `JsonSchema' and
 %% validates the value `Value' against them.
 %% @private
-check_value(Value, [{?TYPE, Type} | Attrs], JsonSchema, Accumulator) ->
+check_value(Value, [{?TYPE, Type} | Attrs], JsonSchema, Path, Accumulator) ->
   case check_type(Value, Type) of
-      true -> check_value(Value, Attrs, JsonSchema, Accumulator);
+      true -> check_value(Value, Attrs, JsonSchema, Path, Accumulator);
       false ->
           %% In case of incorrect type, no other properties are checked against
           %% this value, since it may not be safe
           Error = {'data_invalid', JsonSchema, 'wrong_type', Value},
-          accumulate_error(Error, Accumulator)
+          accumulate_error(Path, Error, Accumulator)
   end;
 check_value( Value
            , [{?PROPERTIES, Properties} | Attrs]
            , JsonSchema
+           , Path
            , Accumulator0
            ) ->
     Accumulator1 =
         case is_json_object(Value) of
             true  -> check_properties(Value, unwrap(Properties),
-                                      JsonSchema, Accumulator0);
+                                      JsonSchema, Path, Accumulator0);
             false -> Accumulator0
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
 check_value( Value
            , [{?PATTERNPROPERTIES, PatternProperties} | Attrs]
            , JsonSchema
+           , Path
            , Accumulator0
            ) ->
     Accumulator1 =
         case is_json_object(Value) of
             true  -> check_pattern_properties(Value, PatternProperties,
-                                              Accumulator0);
+                                              Path, Accumulator0);
             false -> Accumulator0
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
 check_value( Value
            , [{?ADDITIONALPROPERTIES, AdditionalProperties} | Attrs]
            , JsonSchema
+           , Path
            , Accumulator0
            ) ->
     Accumulator1 =
         case is_json_object(Value) of
             true  -> check_additional_properties(Value, AdditionalProperties,
-                                                 JsonSchema, Accumulator0);
+                                                 JsonSchema, Path, Accumulator0);
             false -> Accumulator0
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
-check_value(Value, [{?ITEMS, Items} | Attrs], JsonSchema, Accumulator0) ->
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
+check_value( Value
+           , [{?ITEMS, Items} | Attrs]
+           , JsonSchema
+           , Path
+           , Accumulator0
+           ) ->
     Accumulator1 =
         case is_array(Value) of
-            true  -> check_items(Value, Items, JsonSchema, Accumulator0);
+            true  -> check_items(Value, Items, JsonSchema, Path, Accumulator0);
             false -> Accumulator0
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
 %% doesn't really do anything, since this attribute will be handled
 %% by the previous function clause if it's presented in the schema
 check_value( Value
            , [{?ADDITIONALITEMS, _AdditionalItems} | Attrs]
            , JsonSchema
+           , Path
            , Accumulator
            ) ->
-    check_value(Value, Attrs, JsonSchema, Accumulator);
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator);
 %% doesn't really do anything, since this attribute will be handled
 %% by the previous function clause if it's presented in the schema
-check_value(Value, [{?REQUIRED, _Required} | Attrs], JsonSchema, Accumulator) ->
-    check_value(Value, Attrs, JsonSchema, Accumulator);
+check_value( Value
+           , [{?REQUIRED, _Required} | Attrs]
+           , JsonSchema
+           , Path
+           , Accumulator
+           ) ->
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator);
 check_value( Value
            , [{?DEPENDENCIES, Dependencies} | Attrs]
            , JsonSchema
+           , Path
            , Accumulator0
            ) ->
     Accumulator1 =
         case is_json_object(Value) of
-            true -> check_dependencies(Value, Dependencies,
-                                       JsonSchema, Accumulator0);
+            true -> check_dependencies(Value, Dependencies, JsonSchema,
+                                       Path, Accumulator0);
             false -> Accumulator0
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
-check_value(Value, [{?MINIMUM, Minimum} | Attrs], JsonSchema, Accumulator0) ->
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
+check_value( Value
+           , [{?MINIMUM, Minimum} | Attrs]
+           , JsonSchema
+           , Path
+           , Accumulator0
+           ) ->
     Exclusive = get_path(?EXCLUSIVEMINIMUM, JsonSchema),
     Accumulator1 =
         case check_minimum(Value, Minimum, Exclusive) of
             true -> Accumulator0;
             false ->
                 Error = { 'data_invalid', JsonSchema, 'not_in_range', Value },
-                accumulate_error(Error, Accumulator0)
+                accumulate_error(Path, Error, Accumulator0)
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
-check_value(Value, [{?MAXIMUM, Maximum} | Attrs], JsonSchema, Accumulator0) ->
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
+check_value( Value
+           , [{?MAXIMUM, Maximum} | Attrs]
+           , JsonSchema
+           , Path
+           , Accumulator0) ->
     Exclusive = get_path(?EXCLUSIVEMAXIMUM, JsonSchema),
     Accumulator1 =
         case check_maximum(Value, Maximum, Exclusive) of
             true -> Accumulator0;
             false ->
                 Error = { 'data_invalid', JsonSchema, 'not_in_range', Value },
-                accumulate_error(Error, Accumulator0)
+                accumulate_error(Path, Error, Accumulator0)
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
 %% doesn't really do anything, since this attribute will be handled
 %% by the previous function clause if it's presented in the schema
 check_value( Value
            , [{?EXCLUSIVEMINIMUM, _ExclusiveMinimum} | Attrs]
            , JsonSchema
+           , Path
            , Accumulator
            ) ->
-    check_value(Value, Attrs, JsonSchema, Accumulator);
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator);
 %% doesn't really do anything, since this attribute will be handled
 %% by the previous function clause if it's presented in the schema
 check_value( Value
            , [{?EXCLUSIVEMAXIMUM, _ExclusiveMaximum} | Attrs]
            , JsonSchema
+           , Path
            , Accumulator
            ) ->
-    check_value(Value, Attrs, JsonSchema, Accumulator);
-check_value(Value, [{?MINITEMS, MinItems} | Attrs], JsonSchema, Accumulator0) ->
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator);
+check_value( Value
+           , [{?MINITEMS, MinItems} | Attrs]
+           , JsonSchema
+           , Path
+           , Accumulator0
+           ) ->
     Accumulator1 =
         case check_min_items(Value, MinItems) of
             true -> Accumulator0;
             false ->
                 Error = { 'data_invalid', JsonSchema, 'wrong_size', Value },
-                accumulate_error(Error, Accumulator0)
+                accumulate_error(Path, Error, Accumulator0)
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
-check_value(Value, [{?MAXITEMS, MaxItems} | Attrs], JsonSchema, Accumulator0) ->
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
+check_value( Value
+           , [{?MAXITEMS, MaxItems} | Attrs]
+           , JsonSchema
+           , Path
+           , Accumulator0
+           ) ->
     Accumulator1 =
         case check_max_items(Value, MaxItems) of
             true -> Accumulator0;
             false ->
                 Error = { 'data_invalid', JsonSchema, 'wrong_size', Value },
-                accumulate_error(Error, Accumulator0)
+                accumulate_error(Path, Error, Accumulator0)
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
 check_value( Value
            , [{?UNIQUEITEMS, UniqueItems} | Attrs]
            , JsonSchema
+           , Path
            , Accumulator0
            ) ->
     Accumulator1 =
@@ -289,22 +331,28 @@ check_value( Value
             false -> Accumulator0;
             true ->
                 Error = check_unique_items(Value, UniqueItems, JsonSchema),
-                accumulate_error(Error, Accumulator0)
+                accumulate_error(Path, Error, Accumulator0)
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
-check_value(Value, [{?PATTERN, Pattern} | Attrs], JsonSchema, Accumulator0) ->
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
+check_value( Value
+           , [{?PATTERN, Pattern} | Attrs]
+           , JsonSchema
+           , Path
+           , Accumulator0
+           ) ->
     Accumulator1 =
         case check_pattern(Value, Pattern) of
             true -> Accumulator0;
             false ->
                 Error = { 'data_invalid', JsonSchema,
                           {'no_match', Pattern}, Value },
-                accumulate_error(Error, Accumulator0)
+                accumulate_error(Path, Error, Accumulator0)
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
 check_value( Value
            , [{?MINLENGTH, MinLength} | Attrs]
            , JsonSchema
+           , Path
            , Accumulator0
            ) ->
     Accumulator1 =
@@ -312,12 +360,13 @@ check_value( Value
             true -> Accumulator0;
             false ->
                 Error = { 'data_invalid', JsonSchema, 'wrong_length', Value },
-                accumulate_error(Error, Accumulator0)
+                accumulate_error(Path, Error, Accumulator0)
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
 check_value( Value
            , [{?MAXLENGTH, MaxLength} | Attrs]
            , JsonSchema
+           , Path
            , Accumulator0
            ) ->
     Accumulator1 =
@@ -325,30 +374,36 @@ check_value( Value
             true -> Accumulator0;
             false ->
                 Error = { 'data_invalid', JsonSchema, 'wrong_length', Value },
-                accumulate_error(Error, Accumulator0)
+                accumulate_error(Path, Error, Accumulator0)
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
-check_value(Value, [{?ENUM, Enum} | Attrs], JsonSchema, Accumulator0) ->
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
+check_value(Value, [{?ENUM, Enum} | Attrs], JsonSchema, Path, Accumulator0) ->
     Accumulator1 =
         case check_enum(Value, Enum) of
             true -> Accumulator0;
             false ->
                 Error = { 'data_invalid', JsonSchema, 'not_in_range', Value },
-                accumulate_error(Error, Accumulator0)
+                accumulate_error(Path, Error, Accumulator0)
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
-check_value(Value, [{?FORMAT, Format} | Attrs], JsonSchema, Accumulator0) ->
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
+check_value( Value
+           , [{?FORMAT, Format} | Attrs]
+           , JsonSchema
+           , Path
+           , Accumulator0
+           ) ->
     Accumulator1 =
         case check_format(Value, Format) of
             true -> Accumulator0;
             false ->
                 Error = { 'data_invalid', JsonSchema, 'wrong_format', Value },
-                accumulate_error(Error, Accumulator0)
+                accumulate_error(Path, Error, Accumulator0)
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
 check_value( Value
            , [{?DIVISIBLEBY, DivisibleBy} | Attrs]
            , JsonSchema
+           , Path
            , Accumulator0
            ) ->
     Accumulator1 =
@@ -356,12 +411,13 @@ check_value( Value
             true -> Accumulator0;
             false ->
                 Error = { 'data_invalid', JsonSchema, 'not_divisible', Value },
-                accumulate_error(Error, Accumulator0)
+                accumulate_error(Path, Error, Accumulator0)
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
 check_value( Value
            , [{?DISALLOW, Disallow} | Attrs]
            , JsonSchema
+           , Path
            , Accumulator0
            ) ->
     Accumulator1 =
@@ -369,16 +425,21 @@ check_value( Value
             true -> Accumulator0;
             false ->
                 Error = { 'data_invalid', JsonSchema, 'not_allowed', Value },
-                accumulate_error(Error, Accumulator0)
+                accumulate_error(Path, Error, Accumulator0)
         end,
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
-check_value(Value, [{?EXTENDS, Extends} | Attrs], JsonSchema, Accumulator0) ->
-    Accumulator1 = check_extends(Value, Extends, Accumulator0),
-    check_value(Value, Attrs, JsonSchema, Accumulator1);
-check_value(_Value, [], _JsonSchema, Accumulator) ->
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
+check_value( Value
+           , [{?EXTENDS, Extends} | Attrs]
+           , JsonSchema
+           , Path
+           , Accumulator0
+           ) ->
+    Accumulator1 = check_extends(Value, Extends, Path, Accumulator0),
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator1);
+check_value(_Value, [], _JsonSchema, _Path, Accumulator) ->
     Accumulator;
-check_value(Value, [_Attr | Attrs], JsonSchema, Accumulator) ->
-    check_value(Value, Attrs, JsonSchema, Accumulator).
+check_value(Value, [_Attr | Attrs], JsonSchema, Path, Accumulator) ->
+    check_value(Value, Attrs, JsonSchema, Path, Accumulator).
 
 %% @doc 5.1.  type
 %%
@@ -453,8 +514,9 @@ check_union_type(Value, UnionType) ->
                     %% case when there's a schema in the array,
                     %% then we need to validate against
                     %% that schema
-                    Acc = {ok, {fun dummy_accumulator/2, undefined}},
-                    Acc =:= check_value(Value, unwrap(Type), Type, Acc);
+                    Acc = {ok, {fun dummy_accumulator/3, undefined}},
+                    Path = jesse_json_path:new(),
+                    Acc =:= check_value(Value, unwrap(Type), Type, Path, Acc);
                 false ->
                     true =:= check_type(Value, Type)
             end
@@ -474,7 +536,7 @@ check_union_type(Value, UnionType) ->
 %% the property definition.  Properties are considered unordered, the
 %% order of the instance properties MAY be in any order.
 %% @private
-check_properties(Value, Properties, Schema, Accumulator) ->
+check_properties(Value, Properties, Schema, Path, Accumulator) ->
     FoldFun =
         fun({PropertyName, PropertySchema}, Acc0) ->
             case get_path(PropertyName, Value) of
@@ -490,14 +552,15 @@ check_properties(Value, Properties, Schema, Accumulator) ->
                             Err = { 'data_invalid', Schema,
                                     {'missing_required_property', PropertyName},
                                     Value },
-                            accumulate_error(Err, Acc0);
+                            accumulate_error(Path, Err, Acc0);
 
                         _ -> Acc0
                     end;
 
                 Property ->
+                    NewPath = jesse_json_path:push(PropertyName, Path),
                     check_value(Property, unwrap(PropertySchema),
-                                PropertySchema, Acc0)
+                                PropertySchema, NewPath, Acc0)
             end
         end,
     lists:foldl(FoldFun, Accumulator, Properties).
@@ -512,12 +575,12 @@ check_properties(Value, Properties, Schema, Accumulator) ->
 %% the instance's property MUST be valid against the pattern name's
 %% schema value.
 %% @private
-check_pattern_properties(Value, PatternProperties, Accumulator) ->
+check_pattern_properties(Value, PatternProperties, Path, Accumulator) ->
     lists:foldl(
         fun (Pattern, Accumulator0) ->
             lists:foldl(
                 fun(Property, Accumulator1) ->
-                    check_match(Property, Pattern, Accumulator1)
+                    check_match(Property, Pattern, Path, Accumulator1)
                 end,
                 Accumulator0,
                 unwrap(Value)
@@ -528,10 +591,13 @@ check_pattern_properties(Value, PatternProperties, Accumulator) ->
     ).
 
 %% @private
-check_match({PropertyName, PropertyValue}, {Pattern, Schema}, Accumulator) ->
+check_match({PropertyName, PropertyValue}, {Pattern, Schema},
+            Path, Accumulator) ->
     case re:run(PropertyName, Pattern, [{capture, none}]) of
         match ->
-            check_value(PropertyValue, unwrap(Schema), Schema, Accumulator);
+            NewPath = jesse_json_path:push(PropertyName, Path),
+            check_value(PropertyValue, unwrap(Schema), Schema,
+                        NewPath, Accumulator);
         nomatch -> Accumulator
     end.
 
@@ -544,7 +610,7 @@ check_match({PropertyName, PropertyValue}, {Pattern, Schema}, Accumulator) ->
 %% the schema.  The default value is an empty schema which allows any
 %% value for additional properties.
 %% @private
-check_additional_properties(Value, false, JsonSchema, Accumulator) ->
+check_additional_properties(Value, false, JsonSchema, Path, Accumulator) ->
     Properties        = get_path(?PROPERTIES, JsonSchema),
     PatternProperties = get_path(?PATTERNPROPERTIES, JsonSchema),
     case get_additional_properties(Value, Properties, PatternProperties) of
@@ -552,13 +618,14 @@ check_additional_properties(Value, false, JsonSchema, Accumulator) ->
         _Extras ->
             Error = { 'data_invalid', JsonSchema,
                       'no_extra_properties_allowed', Value },
-            accumulate_error(Error, Accumulator)
+            accumulate_error(Path, Error, Accumulator)
     end;
-check_additional_properties(_Value, true, _JsonSchema, Accumulator) ->
+check_additional_properties(_Value, true, _JsonSchema, _Path, Accumulator) ->
     Accumulator;
 check_additional_properties( Value
                            , AdditionalProperties
                            , JsonSchema
+                           , Path
                            , Accumulator
                            ) ->
     Properties        = get_path(?PROPERTIES, JsonSchema),
@@ -567,10 +634,12 @@ check_additional_properties( Value
         []     -> Accumulator;
         Extras ->
             lists:foldl(
-                fun(Extra, Accumulator0) ->
+                fun({Name, Extra}, Accumulator0) ->
+                    NewPath = jesse_json_path:push(Name, Path),
                     check_value( Extra
                                , unwrap(AdditionalProperties)
                                , AdditionalProperties
+                               , NewPath
                                , Accumulator0 )
                 end,
                 Accumulator,
@@ -589,7 +658,7 @@ get_additional_properties(Value, Properties, PatternProperties) ->
         , ExtraNames0
         , Patterns
         ),
-    lists:map(fun(Name) -> get_path(Name, Value) end, ExtraNames).
+    lists:map(fun(Name) -> {Name, get_path(Name, Value)} end, ExtraNames).
 
 %% @private
 filter_extra_names(Pattern, ExtraNames) ->
@@ -619,35 +688,38 @@ filter_extra_names(Pattern, ExtraNames) ->
 %% (Section 5.6) attribute using the same rules as
 %% "additionalProperties" (Section 5.4) for objects.
 %% @private
-check_items(Value, Items, JsonSchema, Accumulator) ->
+check_items(Value, Items, JsonSchema, Path, Accumulator) ->
     case is_json_object(Items) of
         true  ->
-            lists:foldl(
-                fun(Item, Acc0) ->
-                    check_value(Item, unwrap(Items), Items, Acc0)
+            element(2, lists:foldl(
+                fun(Item, {Num, Acc0}) ->
+                    NewPath = jesse_json_path:push(Num, Path),
+                    { Num + 1,
+                      check_value(Item, unwrap(Items), Items, NewPath, Acc0) }
                 end,
-                Accumulator,
-                Value
-            );
+                {0, Accumulator},
+                Value));
 
         false when is_list(Items) ->
-            check_items_array(Value, Items, JsonSchema, Accumulator);
+            check_items_array(Value, Items, JsonSchema, Path, Accumulator);
 
         _ ->
             Error = {'schema_invalid', JsonSchema, {'wrong_type_items', Items}},
-            accumulate_error(Error, Accumulator)
+            accumulate_error(Path, Error, Accumulator)
     end.
 
 %% @private
-check_items_array(Value, Items, JsonSchema, Accumulator) ->
+check_items_array(Value, Items, JsonSchema, Path, Accumulator) ->
     CheckItemsFun =
-        fun (Tuples) ->
-            lists:foldl(
-                fun({Item, Schema}, Acc0) ->
-                    check_value(Item, unwrap(Schema), Schema, Acc0)
+        fun (Start, Tuples) ->
+            element(2, lists:foldl(
+                fun({Item, Schema}, {Num, Acc0}) ->
+                    NewPath = jesse_json_path:push(Num, Path),
+                    { Num + 1,
+                      check_value(Item, unwrap(Schema), Schema, NewPath, Acc0) }
                 end,
-                Accumulator,
-                Tuples
+                {Start, Accumulator},
+                Tuples)
             )
         end,
 
@@ -660,24 +732,24 @@ check_items_array(Value, Items, JsonSchema, Accumulator) ->
     %% @end
     case length(Value) - length(Items) of
         0 ->
-            CheckItemsFun(lists:zip(Value, Items));
+            CheckItemsFun(0, lists:zip(Value, Items));
         NExtra when NExtra > 0 ->
             case get_path(?ADDITIONALITEMS, JsonSchema) of
                 []      -> Accumulator;
                 true    -> Accumulator;
                 false   ->
-                    accumulate_error({ 'data_invalid', JsonSchema,
-                                       'no_extra_items_allowed', Value },
-                                     Accumulator);
+                    accumulate_error( Path,
+                                      { 'data_invalid', JsonSchema,
+                                        'no_extra_items_allowed', Value },
+                                      Accumulator );
                 AdditionalItems ->
                     ExtraSchemas = lists:duplicate(NExtra, AdditionalItems),
-                    CheckItemsFun(
-                        lists:zip(Value, lists:append(Items, ExtraSchemas))
-                    )
+                    CheckItemsFun(length(Value),
+                        lists:zip(Value, lists:append(Items, ExtraSchemas)))
             end;
         NExtra when NExtra < 0 ->
-            accumulate_error({ 'data_invalid', JsonSchema,
-                               'not_enought_items', Value }, Accumulator)
+            accumulate_error(Path, { 'data_invalid', JsonSchema,
+                                     'not_enought_items', Value }, Accumulator)
     end.
 
 %% @doc 5.8.  dependencies
@@ -700,13 +772,13 @@ check_items_array(Value, Items, JsonSchema, Accumulator) ->
 %%    instance object MUST be valid against the schema.</dd>
 %% </dl>
 %% @private
-check_dependencies(Value, Dependencies, JsonSchema, Accumulator) ->
+check_dependencies(Value, Dependencies, JsonSchema, Path, Accumulator) ->
     lists:foldl(
         fun({DependencyName, DependencyValue}, Acc0) ->
             case get_path(DependencyName, Value) of
                 [] -> Acc0;
-                _  -> check_dependency_value(Value, DependencyValue,
-                                             JsonSchema, Acc0)
+                _  -> check_dependency_value(Value, DependencyValue, JsonSchema,
+                                             Path, Acc0)
             end
         end,
         Accumulator,
@@ -714,33 +786,36 @@ check_dependencies(Value, Dependencies, JsonSchema, Accumulator) ->
     ).
 
 %% @private
-check_dependency_value(Value, Dependency, JsonSchema, Accumulator)
+check_dependency_value(Value, Dependency, JsonSchema, Path, Accumulator)
 when is_binary(Dependency) ->
     case get_path(Dependency, Value) of
-        [] -> accumulate_error({ 'data_invalid', JsonSchema,
-                                 {'missing_dependency', Dependency}, Value },
-                               Accumulator);
+        [] ->
+            Error = { 'data_invalid', JsonSchema,
+                      {'missing_dependency', Dependency}, Value },
+            accumulate_error(Path, Error, Accumulator);
         _  -> Accumulator
     end;
-check_dependency_value(Value, Dependency, JsonSchema, Accumulator) ->
+check_dependency_value(Value, Dependency, JsonSchema, Path, Accumulator) ->
     case is_json_object(Dependency) of
-        true -> check_value(Value, unwrap(Dependency), Dependency, Accumulator);
+        true ->
+            check_value(Value, unwrap(Dependency), Dependency,
+                        Path, Accumulator);
         false ->
             case is_list(Dependency) of
-                true -> check_dependency_array(Value, Dependency,
-                                               JsonSchema, Accumulator);
+                true -> check_dependency_array(Value, Dependency, JsonSchema,
+                                               Path, Accumulator);
                 false ->
                     Error = { 'schema_invalid', JsonSchema,
                               {'wrong_type_dependency', Dependency} },
-                    accumulate_error(Error, Accumulator)
+                    accumulate_error(Path, Error, Accumulator)
             end
     end.
 
 %% @private
-check_dependency_array(Value, Dependency, JsonSchema, Accumulator) ->
+check_dependency_array(Value, Dependency, JsonSchema, Path, Accumulator) ->
     lists:foldl(
         fun(PropertyName, Acc0) ->
-            check_dependency_value(Value, PropertyName, JsonSchema, Acc0)
+            check_dependency_value(Value, PropertyName, JsonSchema, Path, Acc0)
         end,
         Accumulator,
         Dependency
@@ -941,21 +1016,21 @@ check_disallow(Value, Disallow) ->
 %% another schema MAY define additional attributes, constrain existing
 %% attributes, or add other constraints.
 %% @private
-check_extends(Value, Extends, Accumulator) ->
+check_extends(Value, Extends, Path, Accumulator) ->
     case is_json_object(Extends) of
         true  ->
-            check_value(Value, unwrap(Extends), Extends, Accumulator);
+            check_value(Value, unwrap(Extends), Extends, Path, Accumulator);
         false ->
             case is_list(Extends) of
-                true  -> check_extends_array(Value, Extends, Accumulator);
+                true  -> check_extends_array(Value, Extends, Path, Accumulator);
                 false -> ok %% TODO: implement handling of $ref
             end
     end.
 
 %% @private
-check_extends_array(Value, Extends, Accumulator) ->
+check_extends_array(Value, Extends, Path, Accumulator) ->
     lists:foldl(
-        fun(SchemaKey, Acc0) -> check_extends(Value, SchemaKey, Acc0) end,
+        fun(SchemaKey, Acc0) -> check_extends(Value, SchemaKey, Path, Acc0) end,
         Accumulator,
         Extends
     ).
@@ -1031,12 +1106,23 @@ get_path(Key, Schema) ->
 unwrap(Value) ->
   jesse_json_path:unwrap_value(Value).
 
+%%% ---------------------------------------------------------------------------
+-spec accumulate_error/3:: ( Path :: jesse_json_path:path()
+                           , Error :: ok | error()
+                           , Acc0 :: {ok | error, {jesse:accumulator(), term()}}
+                           ) ->
+    Acc1 :: {error, {jesse:accumulator(), term()}}.
+%%% ---------------------------------------------------------------------------
 %% @private
-accumulate_error(ok, Accumulator) -> Accumulator;
-accumulate_error(Error, {_Result, {Fun, Acc0}}) ->
-    {error, {Fun, Fun(Error, Acc0)}}.
+%% @doc Handle error using provided callback fun
+%% @end
+%%% ---------------------------------------------------------------------------
+accumulate_error(_Path, ok, Accumulator) -> Accumulator;
+accumulate_error(Path, Error, {_Result, {Fun, Acc0}}) ->
+    StringPath = jesse_json_path:to_string(Path),
+    {error, {Fun, Fun(StringPath, Error, Acc0)}}.
 
-dummy_accumulator(_Error, undefined) ->
+dummy_accumulator(_Path, _Error, undefined) ->
     undefined.
 
 %%=============================================================================
