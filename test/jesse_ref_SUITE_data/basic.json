@@ -1,0 +1,105 @@
+[
+    {
+        "description": "basic $ref tests",
+        "schemas": [
+            {
+                "id": "http://a",
+                "type": "object",
+                "properties": {
+                    "$schema": {"enum": ["http://a"]},
+                     "a": {"type": "string"}
+                }
+            },
+            {
+                "id": "http://b",
+                "type": "object",
+                "properties": {
+                    "$schema": {"enum": ["http://b"]},
+                    "b": {"type": "string"},
+                    "c": {"$ref": "http://a"}
+                }
+            },
+            {
+                "id": "http://c/boo/",
+                "type": "object",
+                "properties": {
+                    "$schema": {"enum": ["http://c/boo/"]},
+                    "x": {"$ref": "../oob"}
+                }
+            },
+            {
+                "id": "http://c/oob",
+                "type": "object",
+                "properties": {
+                    "$schema": {"enum": ["http://c/oob"]},
+                    "y": {"type": "string"}
+                }
+            },
+            {
+                "id": "http://c/fif/ifi",
+                "type": "object",
+                "properties": {
+                    "$schema": {"enum": ["http://c/fif/ifi"]},
+                    "z": {"$ref": "../oob"}
+                }
+            },
+            {
+                "id": "http://c/ifi/fif",
+                "type": "object",
+                "properties": {
+                    "$schema": {"enum": ["http://c/ifi/fif"]},
+                    "w": {"$ref": "oob"}
+                }
+            },
+            {
+                "id": "http://c/ifi/oob",
+                "type": "string"
+            }
+        ],
+        "tests": [
+            {
+                "description": "object with id",
+                "data": {"$schema": "http://a", "a": "test"},
+                "valid": true
+            },
+            {
+                "description": "referencing another scheme",
+                "data": {
+                    "$schema": "http://b",
+                    "b": "test",
+                    "c": {"a": "subtest"}
+                },
+                "valid": true
+            },
+            {
+                "description": "up-reference",
+                "data": {
+                    "$schema": "http://c/boo/",
+                    "x": {
+                        "y": "upref"
+                    }
+                },
+                "valid": true
+            },
+            {
+                "description": "up-reference from file",
+                "data": {
+                    "$schema": "http://c/fif/ifi",
+                    "z": {
+                        "y": "upref"
+                    }
+                },
+                "valid": true
+            },
+            {
+                "description": "mismatch",
+                "data": {
+                    "$schema": "http://c/ifi/fif",
+                    "w": {
+                        "y": "upref mismatch"
+                    }
+                },
+                "valid": false
+            }
+        ]
+    }]
