@@ -15,8 +15,8 @@
 -type kvc_key() :: binary() | atom() | string().
 -type proplist() :: [{kvc_key(), kvc_obj()}].
 -type kvc_obj_node() :: proplist() | {struct, proplist()}
-                      | dict() | gb_tree() | term().
--type typed_proplist() :: {proplist() | {gb_tree, gb_tree()}, elem_type()}.
+                      | dict:dict() | gb_tree:tree() | term().
+-type typed_proplist() :: {proplist() | {gb_tree:tree(), gb_tree:tree()}, elem_type()}.
 
 -type path() :: list().
 
@@ -241,7 +241,7 @@ normalize(K, undefined) ->
 %%%-----------------------------------------------------------------------------
 
 %%% ---------------------------------------------------------------------------
--spec new/0 :: () -> path().
+-spec new() -> path().
 %%% ---------------------------------------------------------------------------
 %% @doc Create empty JSON path object.
 %%
@@ -252,11 +252,11 @@ normalize(K, undefined) ->
 %%% ---------------------------------------------------------------------------
 new()                                  -> [].
 
--spec new/1 :: (Root :: term()) -> path().
+-spec new(Root :: term()) -> path().
 new(Root)                              -> [Root].
 
 %%% ---------------------------------------------------------------------------
--spec push/2 :: (Element :: term() | list(), Path :: path()) -> path().
+-spec push(Element :: term() | list(), Path :: path()) -> path().
 %%% ---------------------------------------------------------------------------
 %% @doc Push new element <code>Element</code> to the tail of the
 %%      <code>Path</code> object
@@ -268,7 +268,7 @@ push(Element, Path) when is_list(Path) ->
     [Element | Path].
 
 %%% ---------------------------------------------------------------------------
--spec pop/1 :: (Path0 :: path()) -> Path1 :: path().
+-spec pop(Path0 :: path()) -> Path1 :: path().
 %%% ---------------------------------------------------------------------------
 %% @doc Pop element from the tail of the <code>Path0</code> object and return
 %%      the new path.
@@ -286,7 +286,7 @@ to_path(Value) when is_integer(Value)  -> "[" ++ to_path_item(Value) ++ "]";
 to_path(Value)                         -> "." ++ to_path_item(Value).
 
 %%% ---------------------------------------------------------------------------
--spec to_string/1 :: (Path :: path()) -> string().
+-spec to_string(Path :: path()) -> string().
 %%% ---------------------------------------------------------------------------
 %% @doc Return string representation of the given <code>Path</code> object.
 %%
