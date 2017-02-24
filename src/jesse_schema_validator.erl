@@ -1108,7 +1108,7 @@ unwrap(Value) ->
   jesse_json_path:unwrap_value(Value).
 
 %%% ---------------------------------------------------------------------------
--spec accumulate_error/3:: ( Path :: jesse_json_path:path()
+-spec accumulate_error( Path :: jesse_json_path:path()
                            , Error :: ok | error()
                            , Acc0 :: {ok | error, {jesse:accumulator(), term()}}
                            ) ->
