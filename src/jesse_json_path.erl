@@ -9,14 +9,18 @@
 %% API for path management
 -export([new/0, new/1, push/2, pop/1, to_string/1]).
 
+-ifdef(namespaced_types).
+-type dict() :: dict:dict().
+-endif.
+
 -type elem_key_type() :: atom | binary | string | undefined.
 -type elem_type() :: list | elem_key_type().
 -type kvc_obj() :: kvc_obj_node() | [kvc_obj_node()] | list().
 -type kvc_key() :: binary() | atom() | string().
 -type proplist() :: [{kvc_key(), kvc_obj()}].
 -type kvc_obj_node() :: proplist() | {struct, proplist()}
-                      | dict:dict() | gb_tree:tree() | term().
--type typed_proplist() :: {proplist() | {gb_tree:tree(), gb_tree:tree()}, elem_type()}.
+                      | dict() | gb_trees:tree() | term().
+-type typed_proplist() :: {proplist() | {gb_trees:tree(), gb_trees:tree()}, elem_type()}.
 
 -type path() :: list().
 
