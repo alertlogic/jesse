@@ -295,7 +295,7 @@ to_path(Value)                         -> "." ++ to_path_item(Value).
 %% @doc Return string representation of the given <code>Path</code> object.
 %%
 %% For example, if the path is constructed by pushing the following elements
-%%  <code><<"root">>, "object", <<"array">>, 12, item, <<"field">></code>
+%%  <code> &lt;&lt;"root">>, "object", &lt;&lt;"array">>, 12, item, &lt;&lt;"field">></code>
 %% the resulting path will be the following string:
 %%  <code>"root.object.array[12].item.field"</code>
 %% @end
