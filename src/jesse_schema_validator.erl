@@ -77,13 +77,13 @@
 -define(OBJECT,               <<"object">>).
 -define(STRING,               <<"string">>).
 
-%% @doc General error definition tuple
+%% General error definition tuple
 -type error() ::
     { 'schema_invalid', Schema :: jesse:json_term(), reason() } |
     { 'data_invalid',   Schema :: jesse:json_term(), reason(),
                         Data   :: jesse:json_term() }.
 
-%% @doc Uniform type of the error reasons
+%% Uniform type of the error reasons
 -type reason()  :: { 'missing_id_field', Field :: binary() }
                  | { 'missing_required_property', Name :: binary() }
                  | { 'missing_dependency', Name :: binary() }
